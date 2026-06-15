@@ -1,6 +1,7 @@
 import { buildDescriptionFingerprint, detectRecurringPatterns } from "@/services/recurrence";
 import type {
   DetectedRecurringPattern,
+  RecurrenceType,
   RecurringFrequency,
   TransactionForRecurrence,
   TransactionType
@@ -18,6 +19,7 @@ export type ExpectedRecurringPattern = {
   expectedFingerprint?: string;
   minConfidence?: number;
   tags?: string[];
+  expectedRecurrenceType?: RecurrenceType;
   evaluationMode?: ExpectedPatternEvaluationMode;
 };
 
@@ -38,6 +40,46 @@ export type RecurrenceEvaluationDataset = {
   falsePositiveTraps?: FalsePositiveTrap[];
 };
 
+export type EvaluationTruePositive = {
+  expectedId: string;
+  label: string;
+  detectedFingerprint: string;
+  expectedFingerprint?: string;
+  confidence: number;
+  matchedTransactionIds: string[];
+  tokenSimilarity: number;
+  recurrenceStabilityScore: number;
+  recurrenceType: RecurrenceType;
+};
+
+export type EvaluationFalsePositive = {
+  detectedFingerprint: string;
+  type: TransactionType;
+  frequency: RecurringFrequency;
+  categoryId: string | null;
+  confidence: number;
+  recurrenceStabilityScore: number;
+  recurrenceType: RecurrenceType;
+  transactionIds: string[];
+  matchedTrapIds: string[];
+};
+
+export type EvaluationFalseNegative = {
+  expectedId: string;
+  label: string;
+  expectedFingerprint?: string;
+  transactionIds: string[];
+  tags: string[];
+};
+
+export type EvaluationTrapHit = {
+  trapId: string;
+  label: string;
+  reason: string;
+  detectedFingerprint: string;
+  confidence: number;
+};
+
 export type RecurrenceEvaluationReport = {
   datasetId: string;
   companyName: string;
@@ -47,31 +89,9 @@ export type RecurrenceEvaluationReport = {
     transactionId: string;
     fingerprint: string;
   }>;
-  truePositives: Array<{
-    expectedId: string;
-    label: string;
-    detectedFingerprint: string;
-    expectedFingerprint?: string;
-    confidence: number;
-    matchedTransactionIds: string[];
-    tokenSimilarity: number;
-  }>;
-  falsePositives: Array<{
-    detectedFingerprint: string;
-    type: TransactionType;
-    frequency: RecurringFrequency;
-    categoryId: string | null;
-    confidence: number;
-    transactionIds: string[];
-    matchedTrapIds: string[];
-  }>;
-  falseNegatives: Array<{
-    expectedId: string;
-    label: string;
-    expectedFingerprint?: string;
-    transactionIds: string[];
-    tags: string[];
-  }>;
+  truePositives: EvaluationTruePositive[];
+  falsePositives: EvaluationFalsePositive[];
+  falseNegatives: EvaluationFalseNegative[];
   knownLimitations: Array<{
     expectedId: string;
     label: string;
@@ -80,13 +100,12 @@ export type RecurrenceEvaluationReport = {
     transactionIds: string[];
     detected: boolean;
   }>;
-  falsePositiveTrapHits: Array<{
-    trapId: string;
-    label: string;
-    reason: string;
-    detectedFingerprint: string;
-    confidence: number;
-  }>;
+  falsePositiveTrapHits: EvaluationTrapHit[];
+  projectableSummary: EvaluationSummary;
+  projectableTruePositives: EvaluationTruePositive[];
+  projectableFalsePositives: EvaluationFalsePositive[];
+  projectableFalseNegatives: EvaluationFalseNegative[];
+  projectableFalsePositiveTrapHits: EvaluationTrapHit[];
   dataIssues: string[];
 };
 
@@ -117,6 +136,9 @@ export type RecurrenceEvaluationSuite = {
   };
   expectedTagMetrics: Record<string, TagRecallMetric>;
   trapTagMetrics: Record<string, TrapPrecisionMetric>;
+  projectableSummary: EvaluationSummary;
+  projectableExpectedTagMetrics: Record<string, TagRecallMetric>;
+  projectableTrapTagMetrics: Record<string, TrapPrecisionMetric>;
   dataIssues: Array<{
     datasetId: string;
     issue: string;
@@ -152,6 +174,9 @@ export function runRecurringDetectionEvaluation(
   const scoredExpected = dataset.expectedPatterns.filter(
     (expected) => (expected.evaluationMode ?? "scored") === "scored"
   );
+  const fixedExpected = scoredExpected.filter(
+    (expected) => (expected.expectedRecurrenceType ?? "fixed") === "fixed"
+  );
 
   for (const expected of scoredExpected) {
     const match = findBestMatch(expected, detectedPatterns, unmatchedDetected, transactionById);
@@ -175,7 +200,9 @@ export function runRecurringDetectionEvaluation(
       expectedFingerprint: expected.expectedFingerprint,
       confidence: match.pattern.confidence,
       matchedTransactionIds: match.matchedTransactionIds,
-      tokenSimilarity: match.tokenSimilarity
+      tokenSimilarity: match.tokenSimilarity,
+      recurrenceStabilityScore: match.pattern.recurrenceStabilityScore,
+      recurrenceType: match.pattern.recurrenceType
     });
   }
 
@@ -207,6 +234,8 @@ export function runRecurringDetectionEvaluation(
       frequency: pattern.frequency,
       categoryId: pattern.categoryId,
       confidence: pattern.confidence,
+      recurrenceStabilityScore: pattern.recurrenceStabilityScore,
+      recurrenceType: pattern.recurrenceType,
       transactionIds: pattern.transactionIds,
       matchedTrapIds
     };
@@ -229,6 +258,12 @@ export function runRecurringDetectionEvaluation(
         confidence: matchedPattern.confidence
       }
     ];
+  });
+  const projectable = evaluateProjectablePatterns({
+    detectedPatterns,
+    fixedExpected,
+    traps,
+    transactionById
   });
 
   return {
@@ -253,6 +288,21 @@ export function runRecurringDetectionEvaluation(
       falsePositiveConfidences: falsePositives.map((item) => item.confidence),
       dataIssues: dataIssues.length
     }),
+    projectableSummary: buildSummary({
+      expected: fixedExpected.length,
+      scoredExpected: fixedExpected.length,
+      knownFalseNegativeExpected: 0,
+      unsupportedExpected: 0,
+      traps: traps.length,
+      detected: detectedPatterns.filter((pattern) => pattern.recurrenceType === "fixed").length,
+      truePositives: projectable.truePositives.length,
+      falsePositives: projectable.falsePositives.length,
+      falseNegatives: projectable.falseNegatives.length,
+      falsePositiveTrapHits: projectable.falsePositiveTrapHits.length,
+      truePositiveConfidences: projectable.truePositives.map((item) => item.confidence),
+      falsePositiveConfidences: projectable.falsePositives.map((item) => item.confidence),
+      dataIssues: dataIssues.length
+    }),
     fingerprints: dataset.transactions.map((transaction) => ({
       transactionId: transaction.id,
       fingerprint: buildDescriptionFingerprint(transaction.normalizedDescription)
@@ -262,6 +312,10 @@ export function runRecurringDetectionEvaluation(
     falseNegatives,
     knownLimitations,
     falsePositiveTrapHits,
+    projectableTruePositives: projectable.truePositives,
+    projectableFalsePositives: projectable.falsePositives,
+    projectableFalseNegatives: projectable.falseNegatives,
+    projectableFalsePositiveTrapHits: projectable.falsePositiveTrapHits,
     dataIssues
   };
 }
@@ -275,6 +329,12 @@ export function runRecurringDetectionEvaluationSuite(
   );
   const falsePositiveConfidences = reports.flatMap((report) =>
     report.falsePositives.map((item) => item.confidence)
+  );
+  const projectableTruePositiveConfidences = reports.flatMap((report) =>
+    report.projectableTruePositives.map((item) => item.confidence)
+  );
+  const projectableFalsePositiveConfidences = reports.flatMap((report) =>
+    report.projectableFalsePositives.map((item) => item.confidence)
   );
 
   return {
@@ -298,8 +358,25 @@ export function runRecurringDetectionEvaluationSuite(
       datasets: reports.length,
       transactions: sum(reports.map((report) => report.fingerprints.length))
     },
+    projectableSummary: buildSummary({
+      expected: sum(reports.map((report) => report.projectableSummary.expected)),
+      scoredExpected: sum(reports.map((report) => report.projectableSummary.scoredExpected)),
+      knownFalseNegativeExpected: 0,
+      unsupportedExpected: 0,
+      traps: sum(reports.map((report) => report.projectableSummary.traps)),
+      detected: sum(reports.map((report) => report.projectableSummary.detected)),
+      truePositives: sum(reports.map((report) => report.projectableSummary.truePositives)),
+      falsePositives: sum(reports.map((report) => report.projectableSummary.falsePositives)),
+      falseNegatives: sum(reports.map((report) => report.projectableSummary.falseNegatives)),
+      falsePositiveTrapHits: sum(reports.map((report) => report.projectableSummary.falsePositiveTrapHits)),
+      truePositiveConfidences: projectableTruePositiveConfidences,
+      falsePositiveConfidences: projectableFalsePositiveConfidences,
+      dataIssues: sum(reports.map((report) => report.projectableSummary.dataIssues))
+    }),
     expectedTagMetrics: buildExpectedTagMetrics(datasets, reports),
     trapTagMetrics: buildTrapTagMetrics(datasets, reports),
+    projectableExpectedTagMetrics: buildExpectedTagMetrics(datasets, reports, "projectable"),
+    projectableTrapTagMetrics: buildTrapTagMetrics(datasets, reports, "projectable"),
     dataIssues: reports.flatMap((report) =>
       report.dataIssues.map((issue) => ({
         datasetId: report.datasetId,
@@ -383,6 +460,101 @@ export function formatRecurrenceEvaluationReport(
   }
 
   return lines.join("\n");
+}
+
+function evaluateProjectablePatterns(input: {
+  detectedPatterns: DetectedRecurringPattern[];
+  fixedExpected: ExpectedRecurringPattern[];
+  traps: FalsePositiveTrap[];
+  transactionById: Map<string, TransactionForRecurrence>;
+}) {
+  const unmatchedDetected = new Set(
+    input.detectedPatterns
+      .map((pattern, index) => (pattern.recurrenceType === "fixed" ? index : null))
+      .filter((index): index is number => index !== null)
+  );
+  const truePositives: EvaluationTruePositive[] = [];
+  const falseNegatives: EvaluationFalseNegative[] = [];
+
+  for (const expected of input.fixedExpected) {
+    const match = findBestMatch(expected, input.detectedPatterns, unmatchedDetected, input.transactionById);
+
+    if (!match) {
+      falseNegatives.push({
+        expectedId: expected.id,
+        label: expected.label,
+        expectedFingerprint: expected.expectedFingerprint,
+        transactionIds: expected.transactionIds,
+        tags: expected.tags ?? []
+      });
+      continue;
+    }
+
+    unmatchedDetected.delete(match.index);
+    truePositives.push({
+      expectedId: expected.id,
+      label: expected.label,
+      detectedFingerprint: match.pattern.descriptionPattern,
+      expectedFingerprint: expected.expectedFingerprint,
+      confidence: match.pattern.confidence,
+      matchedTransactionIds: match.matchedTransactionIds,
+      tokenSimilarity: match.tokenSimilarity,
+      recurrenceStabilityScore: match.pattern.recurrenceStabilityScore,
+      recurrenceType: match.pattern.recurrenceType
+    });
+  }
+
+  const falsePositives = [...unmatchedDetected].map((index) => {
+    const pattern = input.detectedPatterns[index];
+    const matchedTrapIds = input.traps
+      .filter((trap) => overlapsEnough(pattern.transactionIds, trap.transactionIds, 0.5, 0.5))
+      .map((trap) => trap.id);
+
+    return patternToFalsePositive(pattern, matchedTrapIds);
+  });
+  const falsePositiveTrapHits = input.traps.flatMap((trap) => {
+    const matchedPattern = falsePositives.find((pattern) =>
+      overlapsEnough(pattern.transactionIds, trap.transactionIds, 0.5, 0.5)
+    );
+
+    if (!matchedPattern) {
+      return [];
+    }
+
+    return [
+      {
+        trapId: trap.id,
+        label: trap.label,
+        reason: trap.reason,
+        detectedFingerprint: matchedPattern.detectedFingerprint,
+        confidence: matchedPattern.confidence
+      }
+    ];
+  });
+
+  return {
+    truePositives,
+    falsePositives,
+    falseNegatives,
+    falsePositiveTrapHits
+  };
+}
+
+function patternToFalsePositive(
+  pattern: DetectedRecurringPattern,
+  matchedTrapIds: string[]
+): EvaluationFalsePositive {
+  return {
+    detectedFingerprint: pattern.descriptionPattern,
+    type: pattern.type,
+    frequency: pattern.frequency,
+    categoryId: pattern.categoryId,
+    confidence: pattern.confidence,
+    recurrenceStabilityScore: pattern.recurrenceStabilityScore,
+    recurrenceType: pattern.recurrenceType,
+    transactionIds: pattern.transactionIds,
+    matchedTrapIds
+  };
 }
 
 function findBestMatch(
@@ -526,11 +698,19 @@ function buildSummary(input: {
 
 function buildExpectedTagMetrics(
   datasets: RecurrenceEvaluationDataset[],
-  reports: RecurrenceEvaluationReport[]
+  reports: RecurrenceEvaluationReport[],
+  mode: "detected" | "projectable" = "detected"
 ): Record<string, TagRecallMetric> {
   const byTag = new Map<string, { expected: number; truePositives: number }>();
   const truePositiveIdsByDataset = new Map(
-    reports.map((report) => [report.datasetId, new Set(report.truePositives.map((item) => item.expectedId))])
+    reports.map((report) => [
+      report.datasetId,
+      new Set(
+        (mode === "projectable" ? report.projectableTruePositives : report.truePositives).map(
+          (item) => item.expectedId
+        )
+      )
+    ])
   );
 
   for (const dataset of datasets) {
@@ -538,6 +718,10 @@ function buildExpectedTagMetrics(
 
     for (const expected of dataset.expectedPatterns) {
       if ((expected.evaluationMode ?? "scored") !== "scored") {
+        continue;
+      }
+
+      if (mode === "projectable" && (expected.expectedRecurrenceType ?? "fixed") !== "fixed") {
         continue;
       }
 
@@ -565,11 +749,19 @@ function buildExpectedTagMetrics(
 
 function buildTrapTagMetrics(
   datasets: RecurrenceEvaluationDataset[],
-  reports: RecurrenceEvaluationReport[]
+  reports: RecurrenceEvaluationReport[],
+  mode: "detected" | "projectable" = "detected"
 ): Record<string, TrapPrecisionMetric> {
   const byTag = new Map<string, { traps: number; falsePositiveTrapHits: number }>();
   const trapHitsByDataset = new Map(
-    reports.map((report) => [report.datasetId, new Set(report.falsePositiveTrapHits.map((item) => item.trapId))])
+    reports.map((report) => [
+      report.datasetId,
+      new Set(
+        (mode === "projectable" ? report.projectableFalsePositiveTrapHits : report.falsePositiveTrapHits).map(
+          (item) => item.trapId
+        )
+      )
+    ])
   );
 
   for (const dataset of datasets) {

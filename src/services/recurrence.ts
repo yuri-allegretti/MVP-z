@@ -8,6 +8,7 @@ import {
 import { roundMoney } from "@/lib/money";
 import type {
   DetectedRecurringPattern,
+  RecurrenceType,
   RecurringFrequency,
   TransactionForRecurrence
 } from "@/types/cashflow";
@@ -107,6 +108,10 @@ export type RecurrenceDetectionOptions = {
 };
 
 const DEFAULT_MIN_TOKEN_JACCARD = 0.6;
+const FIXED_STABILITY_THRESHOLD = 0.75;
+const FIXED_VALUE_STABILITY_THRESHOLD = 0.7;
+const FIXED_DATE_STABILITY_THRESHOLD = 0.75;
+const FIXED_TEXT_STABILITY_THRESHOLD = 0.6;
 
 export function buildDescriptionFingerprint(normalizedDescription: string): string {
   return getFingerprintTokens(normalizedDescription)
@@ -185,7 +190,25 @@ export function detectRecurringPatterns(
     const accountId = getConsistentAccountId(sorted);
     const sameCategory = Boolean(categoryId);
     const descriptionPattern = buildClusterFingerprint(cluster.items);
-    const datesRegular = true;
+    const dateStabilityScore = calculateDateStabilityScore(frequency, sorted, intervals);
+    const textStabilityScore = calculateTextStabilityScore(cluster.items);
+    const valueStabilityScore = calculateValueStabilityScore({
+      averageAmount,
+      minAmount,
+      maxAmount
+    });
+    const recurrenceStabilityScore = calculateRecurrenceStabilityScore({
+      dateStabilityScore,
+      textStabilityScore,
+      valueStabilityScore
+    });
+    const recurrenceType = classifyRecurrenceType({
+      recurrenceStabilityScore,
+      dateStabilityScore,
+      textStabilityScore,
+      valueStabilityScore
+    });
+    const datesRegular = dateStabilityScore >= FIXED_DATE_STABILITY_THRESHOLD;
     const latestDate = toDateOnly(sorted[sorted.length - 1].date);
     const type = sorted[0].type;
     const expectedDayOfMonth =
@@ -214,6 +237,8 @@ export function detectRecurringPatterns(
       expectedDayOfMonth,
       expectedWeekday,
       confidence: Math.min(roundMoney(confidence), 1),
+      recurrenceStabilityScore,
+      recurrenceType,
       nextExpectedDate,
       status: "suggested",
       transactionIds: sorted.map((transaction) => transaction.id)
@@ -273,6 +298,87 @@ function buildClusterFingerprint(items: FingerprintedTransaction[]): string {
     .slice(0, 6);
 
   return stableTokens.length > 0 ? stableTokens.join(" ") : items[0].fingerprint;
+}
+
+function calculateDateStabilityScore(
+  frequency: RecurringFrequency,
+  transactions: TransactionForRecurrence[],
+  intervals: number[]
+): number {
+  if (intervals.length === 0) {
+    return 0;
+  }
+
+  if (frequency === "monthly") {
+    const daysOfMonth = transactions.map((transaction) => transaction.date.getUTCDate());
+    const dayWindow = Math.max(...daysOfMonth) - Math.min(...daysOfMonth);
+    const intervalScore = intervals.filter((interval) => interval >= 25 && interval <= 35).length / intervals.length;
+    const dayScore = clamp01(1 - dayWindow / 7);
+
+    return roundMoney(intervalScore * 0.6 + dayScore * 0.4);
+  }
+
+  if (frequency === "weekly") {
+    return roundMoney(intervals.filter((interval) => interval >= 6 && interval <= 8).length / intervals.length);
+  }
+
+  return 0;
+}
+
+function calculateTextStabilityScore(items: FingerprintedTransaction[]): number {
+  if (items.length < 2) {
+    return items.length === 1 ? 1 : 0;
+  }
+
+  const scores: number[] = [];
+
+  for (let leftIndex = 0; leftIndex < items.length; leftIndex++) {
+    for (let rightIndex = leftIndex + 1; rightIndex < items.length; rightIndex++) {
+      scores.push(jaccardSimilarity(items[leftIndex].tokens, items[rightIndex].tokens));
+    }
+  }
+
+  return roundMoney(average(scores));
+}
+
+export function calculateValueStabilityScore(input: {
+  averageAmount: number;
+  minAmount: number;
+  maxAmount: number;
+}): number {
+  const amountVariation = (input.maxAmount - input.minAmount) / Math.max(input.averageAmount, 1);
+
+  return roundMoney(clamp01(1 - amountVariation / 0.75));
+}
+
+function calculateRecurrenceStabilityScore(input: {
+  dateStabilityScore: number;
+  textStabilityScore: number;
+  valueStabilityScore: number;
+}): number {
+  return roundMoney(
+    input.dateStabilityScore * 0.35 +
+      input.textStabilityScore * 0.25 +
+      input.valueStabilityScore * 0.4
+  );
+}
+
+function classifyRecurrenceType(input: {
+  recurrenceStabilityScore: number;
+  dateStabilityScore: number;
+  textStabilityScore: number;
+  valueStabilityScore: number;
+}): RecurrenceType {
+  if (
+    input.recurrenceStabilityScore >= FIXED_STABILITY_THRESHOLD &&
+    input.dateStabilityScore >= FIXED_DATE_STABILITY_THRESHOLD &&
+    input.textStabilityScore >= FIXED_TEXT_STABILITY_THRESHOLD &&
+    input.valueStabilityScore >= FIXED_VALUE_STABILITY_THRESHOLD
+  ) {
+    return "fixed";
+  }
+
+  return "variable";
 }
 
 function detectFrequency(
@@ -340,6 +446,10 @@ function getConsistentCategoryId(transactions: TransactionForRecurrence[]): stri
 
 function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function clamp01(value: number): number {
+  return Math.min(Math.max(value, 0), 1);
 }
 
 function median(values: number[]): number {

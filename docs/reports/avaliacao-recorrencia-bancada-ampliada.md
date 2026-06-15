@@ -4,158 +4,151 @@ Data: 2026-06-15
 
 ## Escopo
 
-Esta rodada ampliou apenas a bancada de avaliacao de `detectRecurringPatterns()`.
+Esta rodada ampliou a avaliacao de `detectRecurringPatterns()` e separou dois
+conceitos:
+
+- recorrencia detectada: padrao recorrente encontrado no historico;
+- recorrencia projetavel: padrao detectado com estabilidade suficiente para
+  entrar na projecao.
+
 Nao houve alteracao de UI, dashboard, autenticacao, Open Finance, IA/ML ou regras
-de categorizacao.
+de categorizacao. Tambem nao foram adicionadas regras especificas por categoria
+nem novas listas especiais de palavras.
 
 ## Tamanho da amostra
 
 - Datasets: 20.
 - Transacoes sinteticas: 495.
 - Recorrencias esperadas rotuladas: 88.
-- Recorrencias esperadas pontuadas: 69.
+- Recorrencias pontuadas: 69.
 - Casos unsupported/false negative esperado: 19.
 - Armadilhas de falso positivo: 38.
 
-Tipos de empresa cobertos:
+## Estabilidade
 
-- SaaS B2B.
-- Clinica medica.
-- Restaurante.
-- E-commerce.
-- Agencia de marketing.
-- Escola/curso.
-- Escritorio juridico.
-- Industria pequena.
-- Marketplace seller.
-- Consultoria.
-- Academia.
-- Imobiliaria.
-- Logistica/frete.
-- Oficina mecanica.
-- Empresa de eventos.
-- Construtora pequena.
-- Pet shop.
-- Coworking.
-- Produtor de conteudo/infoproduto.
-- Comercio varejista.
+Cada recorrencia detectada agora recebe:
 
-## Resultado global
+- `recurrenceStabilityScore`;
+- `recurrenceType`, com valores `fixed` ou `variable`.
 
-| Metrica | Valor |
-| --- | ---: |
-| Detectadas | 79 |
-| True positives | 64 |
-| False positives | 15 |
-| False negatives | 5 |
-| Precision | 0.81 |
-| Recall | 0.93 |
-| F1 | 0.86 |
-| Confidence media dos TPs | 1.00 |
-| Confidence media dos FPs | 0.80 |
-| Armadilhas atingidas por FP | 15 |
-| Problemas de integridade nos datasets | 0 |
+O score combina criterios gerais:
 
-As metas de recall e F1 foram atingidas, mas a meta inicial de precision `>= 0.85`
-nao foi atingida. A meta de falsos positivos em armadilhas tambem nao foi
-atingida: 15 hits em 38 armadilhas, acima do limite de 30%.
+- estabilidade das datas;
+- similaridade textual dentro do grupo;
+- variabilidade de valor.
+
+Uma recorrencia pode existir e ainda assim ser `variable`. A projecao usa apenas
+recorrencias `fixed`.
+
+## Comparativo antes/depois
+
+Antes, a avaliacao tinha um unico conceito: toda recorrencia detectada era
+tratada como candidata a uso. Depois, a avaliacao separa deteccao e
+projetabilidade.
+
+| Metrica | Recorrencia detectada | Recorrencia projetavel |
+| --- | ---: | ---: |
+| Detectadas | 79 | 64 |
+| True positives | 64 | 64 |
+| False positives | 15 | 0 |
+| False negatives | 5 | 5 |
+| Precision | 0.81 | 1.00 |
+| Recall | 0.93 | 0.93 |
+| F1 | 0.86 | 0.96 |
+| Confidence media dos TPs | 1.00 | 1.00 |
+| Confidence media dos FPs | 0.80 | - |
+| Armadilhas atingidas por FP | 15 | 0 |
+| Problemas de integridade | 0 | 0 |
 
 ## Metricas por tipo
 
-| Grupo | Esperadas/armadilhas | Acertos/hits | Metrica |
-| --- | ---: | ---: | ---: |
-| Despesas mensais fixas | 57 | 54 TP | recall 0.95 |
-| Receitas recorrentes consistentes | 12 | 10 TP | recall 0.83 |
-| Descricoes alternadas com tokens em comum | 62 | 57 TP | recall 0.92 |
-| Receitas variaveis/genericas | 12 armadilhas | 0 hits | precision 1.00 |
-| Marketplace payouts | 4 armadilhas | 4 hits | precision 0.00 |
-| Cartao/taxa generica | 5 armadilhas | 5 hits | precision 0.00 |
-| Campanhas de marketing variaveis | 2 armadilhas | 2 hits | precision 0.00 |
-| Fretes por volume | 2 armadilhas | 2 hits | precision 0.00 |
-| Impostos instaveis | 1 armadilha | 1 hit | precision 0.00 |
-| Estoque irregular | 8 armadilhas | 1 hit | precision 0.88 |
+| Grupo | Recorrencia detectada | Recorrencia projetavel |
+| --- | ---: | ---: |
+| Despesas mensais fixas | recall 0.95 | recall 0.95 |
+| Receitas recorrentes consistentes | recall 0.83 | recall 0.83 |
+| Descricoes alternadas com tokens em comum | recall 0.92 | recall 0.92 |
+| Receitas variaveis/genericas | precision 1.00 | precision 1.00 |
+| Marketplace payouts | precision 0.00 | precision 1.00 |
+| Cartao/taxa generica | precision 0.00 | precision 1.00 |
+| Campanhas de marketing variaveis | precision 0.00 | precision 1.00 |
+| Fretes por volume | precision 0.00 | precision 1.00 |
+| Impostos instaveis | precision 0.00 | precision 1.00 |
+| Estoque irregular | precision 0.88 | precision 1.00 |
 
 ## Melhores casos
 
-- Escola e cursos: precision 1.00, recall 1.00, F1 1.00.
-- Oficina mecanica: precision 1.00, recall 1.00, F1 1.00.
-- Empresa de eventos: precision 1.00, recall 1.00, F1 1.00.
-- Pet shop: precision 1.00, recall 1.00, F1 1.00.
-- SaaS B2B: precision 0.80, recall 1.00, F1 0.89.
+- Escola e cursos.
+- Oficina mecanica.
+- Empresa de eventos.
+- Pet shop.
+- SaaS B2B.
+
+Esses casos mantiveram bom recall para recorrencias fixas e nao produziram
+falsos positivos projetaveis relevantes.
 
 ## Piores casos
 
-- Escritorio juridico: precision 0.50, recall 0.33, F1 0.40.
-  - FN: aluguel do escritorio juridico.
-  - FN: honorarios mensais do cliente Atlas.
-  - FP: custas/taxas processuais mensais variaveis.
-- Consultoria: precision 1.00, recall 0.33, F1 0.50.
-  - FN: pro-labore de socios.
-  - FN: contrato recorrente do cliente Beta.
-- Construtora pequena: precision 0.60, recall 1.00, F1 0.75.
-  - FP: materiais pagos mensalmente por fase.
-  - FP: fretes de obra por volume.
+- Escritorio juridico: ainda tem falsos negativos em aluguel e honorarios
+  mensais com descricao alternada.
+- Consultoria: ainda tem falsos negativos em pro-labore e contrato recorrente.
+- Restaurante: ainda tem falso negativo em aluguel com descricao alternada.
+
+Essas falhas sao de deteccao textual; a camada de estabilidade nao corrige
+recorrencias que sequer foram agrupadas.
 
 ## Falsos positivos mais perigosos
 
-- Repasses de marketplace: detectados como receita mensal recorrente apesar de
-  dependerem de volume vendido.
-- Repasses de cartao/academia e lancamentos de infoproduto: detectados como
-  recorrencia de receita, embora tenham alta variacao.
-- Cartao corporativo com descritor generico: detectado como despesa recorrente
-  mesmo agregando compras diferentes.
-- Campanhas de marketing mensais: detectadas como recorrencia apesar de verba
-  muito variavel.
-- Fretes por volume: detectados como recorrencia mensal, mas variam por demanda.
-- Impostos mensais instaveis: detectados como recorrencia com confidence 0.80.
+Na avaliacao de recorrencia detectada, os falsos positivos perigosos continuam
+aparecendo em:
+
+- marketplace payouts;
+- cartao corporativo com descritor generico;
+- campanhas de marketing variaveis;
+- fretes por volume;
+- impostos instaveis;
+- algumas compras de estoque.
+
+Na avaliacao projetavel, esses casos passaram a ser classificados como
+`variable`, entao nao entram na projecao.
 
 ## Falsos negativos mais importantes
 
-- Aluguel juridico com descricao alternada entre `imobiliaria foro` e
-  `conjunto juridico imobiliaria foro`.
+- Aluguel juridico com descricao alternada.
 - Honorarios mensais juridicos com descricao alternada.
 - Aluguel de restaurante com descricao alternada.
 - Pro-labore de consultoria.
 - Contrato recorrente de consultoria.
 
-Esses falsos negativos indicam que o matching textual ainda e sensivel a termos
-de contexto que aparecem em parte das descricoes.
+## Casos unsupported
 
-## Casos unsupported/false negative esperado
-
-Foram incluidos 19 casos marcados como `unsupported`, principalmente:
+Foram mantidos 19 casos `unsupported`, principalmente:
 
 - recorrencias anuais;
 - recorrencias quinzenais;
 - recorrencias trimestrais.
 
-Esses casos ficam fora das metricas pontuadas porque o tipo atual
-`RecurringFrequency` e a funcao `detectFrequency()` ainda suportam efetivamente
-apenas mensal e semanal. Eles permanecem na bancada para impedir que essa
-limitacao seja esquecida.
+Eles continuam fora das metricas pontuadas porque a deteccao atual suporta
+efetivamente mensal e semanal.
 
-## Recomendacoes para proxima versao do algoritmo
+## Recomendacoes para proxima versao
 
-1. Criar criterio explicito de variacao de valor para nao promover padroes com
-   alta variacao a recorrencia operacional, especialmente marketing, frete,
-   marketplace payout, cartao e imposto.
-2. Separar confidence de elegibilidade: hoje padroes variaveis ainda saem como
-   recorrencias com confidence media de 0.80.
-3. Adicionar suporte real ou classificacao explicita para frequencias quinzenal,
-   trimestral e anual.
-4. Melhorar tokenizacao generica para reduzir falsos negativos em descricoes
-   alternadas com termos de contexto.
-5. Avaliar regras diferentes por tipo de fluxo: receita variavel, despesa fixa,
-   fornecedores e cartao corporativo tem riscos distintos.
+1. Melhorar o agrupamento textual sem criar aliases por fornecedor ou regras por
+   categoria.
+2. Persistir `recurrenceStabilityScore` e `recurrenceType` no banco se a UI de
+   recorrencias passar a expor essa distincao.
+3. Adicionar suporte real a quinzenal, trimestral e anual.
+4. Separar experiencia de revisao: mostrar padroes `variable` como detectados,
+   mas nao projetaveis por padrao.
+5. Manter a bancada com casos dificeis; a melhora de precision projetavel nao
+   significa validacao final do algoritmo.
 
 ## Estado dos testes
 
-`npm test` falhou de forma esperada nesta rodada porque a bancada ampliada mostrou
-que as metas globais ainda nao sao todas atendidas:
+Depois da separacao entre recorrencia detectada e projetavel:
 
-- precision atual: 0.81, meta: 0.85.
-- hits em armadilhas: 15 de 38, limite: 30%.
+- `npm test`: passou.
+- `npm run build`: passou.
 
-Isso nao deve ser interpretado como algoritmo validado. A amostra ainda e
-sintetica, mas ja e forte o suficiente para mostrar lacunas relevantes de
-generalizacao.
+Esta amostra ainda e sintetica. Ela indica que o conceito de estabilidade reduz
+risco de projecao indevida, mas nao valida plenamente o algoritmo para dados
+reais.

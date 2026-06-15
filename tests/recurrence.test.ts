@@ -19,9 +19,11 @@ describe("detectRecurringPatterns", () => {
       frequency: "monthly",
       type: "expense",
       categoryId: "rent",
+      recurrenceType: "fixed",
       status: "suggested"
     });
     expect(patterns[0].confidence).toBeGreaterThanOrEqual(0.75);
+    expect(patterns[0].recurrenceStabilityScore).toBeGreaterThanOrEqual(0.75);
   });
 
   it("nao transforma transacoes aleatorias em recorrencia", () => {
@@ -59,9 +61,28 @@ describe("detectRecurringPatterns", () => {
     expect(patterns[0]).toMatchObject({
       descriptionPattern: "imobiliaria sao jose",
       frequency: "monthly",
-      categoryId: "rent"
+      categoryId: "rent",
+      recurrenceType: "fixed"
     });
     expect(patterns[0].transactionIds.sort()).toEqual(["1", "2", "3", "4"]);
+  });
+
+  it("detecta recorrencia variavel sem classificar como projetavel", () => {
+    const transactions: TransactionForRecurrence[] = [
+      tx("1", "2026-01-10", "REPASSE MARKETPLACE VENDAS PERIODO", 10000, "income", "sales"),
+      tx("2", "2026-02-10", "REPASSE MARKETPLACE VENDAS PERIODO", 28000, "income", "sales"),
+      tx("3", "2026-03-10", "REPASSE MARKETPLACE VENDAS PERIODO", 14000, "income", "sales"),
+      tx("4", "2026-04-10", "REPASSE MARKETPLACE VENDAS PERIODO", 41000, "income", "sales")
+    ];
+
+    const patterns = detectRecurringPatterns(transactions);
+
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0]).toMatchObject({
+      frequency: "monthly",
+      recurrenceType: "variable"
+    });
+    expect(patterns[0].recurrenceStabilityScore).toBeLessThan(0.75);
   });
 
   it("nao agrupa descricoes parecidas quando fornecedores sao diferentes", () => {

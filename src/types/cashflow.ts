@@ -5,6 +5,7 @@ export type RuleField = "description" | "normalizedDescription";
 export type RuleOperator = "contains" | "regex" | "equals";
 export type RecurringFrequency = "weekly" | "monthly" | "yearly" | "unknown";
 export type RecurringStatus = "suggested" | "confirmed" | "ignored";
+export type RecurrenceType = "fixed" | "variable";
 export type ProjectionScenario = "conservative" | "likely" | "optimistic";
 export type ProjectionHorizon = 30 | 60 | 90;
 
@@ -56,6 +57,8 @@ export interface DetectedRecurringPattern {
   expectedDayOfMonth: number | null;
   expectedWeekday: number | null;
   confidence: number;
+  recurrenceStabilityScore: number;
+  recurrenceType: RecurrenceType;
   nextExpectedDate: Date;
   status: "suggested";
   transactionIds: string[];
@@ -71,6 +74,8 @@ export interface ProjectionRecurringInput {
   expectedWeekday: number | null;
   nextExpectedDate: Date;
   confidence: number;
+  recurrenceStabilityScore: number;
+  recurrenceType: RecurrenceType;
   status: RecurringStatus;
 }
 

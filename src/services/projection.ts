@@ -72,6 +72,10 @@ export function isPatternEligible(
   pattern: ProjectionRecurringInput,
   scenario: ProjectionScenario
 ): boolean {
+  if (pattern.recurrenceType !== "fixed") {
+    return false;
+  }
+
   if (scenario === "conservative") {
     return pattern.status === "confirmed";
   }

@@ -20,6 +20,8 @@ describe("generateCashflowAlerts", () => {
           expectedWeekday: null,
           nextExpectedDate: new Date("2026-01-02T00:00:00.000Z"),
           confidence: 1,
+          recurrenceStabilityScore: 1,
+          recurrenceType: "fixed",
           status: "confirmed"
         }
       ]

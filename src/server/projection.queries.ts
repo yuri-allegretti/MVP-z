@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { toDateOnly } from "@/lib/dates";
 import { generateCashflowAlerts } from "@/services/alerts";
 import { generateCashflowProjection } from "@/services/projection";
+import { calculateValueStabilityScore } from "@/services/recurrence";
 import type {
   CashflowProjection,
   ProjectionHorizon,
@@ -87,18 +88,29 @@ async function getProjectionRecurringPatterns(
     orderBy: [{ status: "asc" }, { confidence: "desc" }]
   });
 
-  return patterns.map((pattern) => ({
-    id: pattern.id,
-    descriptionPattern: pattern.descriptionPattern,
-    averageAmount: Number(pattern.averageAmount),
-    type: pattern.type,
-    frequency: pattern.frequency,
-    expectedDayOfMonth: pattern.expectedDayOfMonth,
-    expectedWeekday: pattern.expectedWeekday,
-    nextExpectedDate: pattern.nextExpectedDate,
-    confidence: Number(pattern.confidence),
-    status: pattern.status
-  }));
+  return patterns.map((pattern) => {
+    const averageAmount = Number(pattern.averageAmount);
+    const valueStabilityScore = calculateValueStabilityScore({
+      averageAmount,
+      minAmount: Number(pattern.minAmount),
+      maxAmount: Number(pattern.maxAmount)
+    });
+
+    return {
+      id: pattern.id,
+      descriptionPattern: pattern.descriptionPattern,
+      averageAmount,
+      type: pattern.type,
+      frequency: pattern.frequency,
+      expectedDayOfMonth: pattern.expectedDayOfMonth,
+      expectedWeekday: pattern.expectedWeekday,
+      nextExpectedDate: pattern.nextExpectedDate,
+      confidence: Number(pattern.confidence),
+      recurrenceStabilityScore: valueStabilityScore,
+      recurrenceType: valueStabilityScore >= 0.7 ? "fixed" : "variable",
+      status: pattern.status
+    };
+  });
 }
 
 function generateProjectionFromBase(input: {

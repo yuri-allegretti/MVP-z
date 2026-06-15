@@ -20,16 +20,21 @@ describe("recurrence evaluation bench", () => {
     expect(suite.dataIssues).toEqual([]);
   });
 
-  it("atinge as metas globais iniciais sem erro silencioso", () => {
+  it("calcula metricas separadas para recorrencia detectada e projetavel", () => {
     const suite = runRecurringDetectionEvaluationSuite(recurrenceEvaluationDatasets);
-    const maxFalsePositivesFromTraps = Math.floor(suite.summary.traps * 0.3);
+    const maxProjectableFalsePositivesFromTraps = Math.floor(suite.projectableSummary.traps * 0.3);
 
-    expect(suite.summary.precision).toBeGreaterThanOrEqual(0.85);
     expect(suite.summary.recall).toBeGreaterThanOrEqual(0.75);
     expect(suite.summary.f1).toBeGreaterThanOrEqual(0.8);
-    expect(suite.summary.falsePositiveTrapHits).toBeLessThanOrEqual(maxFalsePositivesFromTraps);
-    expect(suite.summary.falsePositives).toBeLessThanOrEqual(maxFalsePositivesFromTraps);
+    expect(suite.projectableSummary.precision).toBeGreaterThanOrEqual(0.85);
+    expect(suite.projectableSummary.recall).toBeGreaterThanOrEqual(0.75);
+    expect(suite.projectableSummary.f1).toBeGreaterThanOrEqual(0.8);
+    expect(suite.projectableSummary.precision).toBeGreaterThanOrEqual(suite.summary.precision);
+    expect(suite.projectableSummary.falsePositiveTrapHits).toBeLessThanOrEqual(
+      maxProjectableFalsePositivesFromTraps
+    );
     expect(suite.summary.dataIssues).toBe(0);
+    expect(suite.projectableSummary.dataIssues).toBe(0);
   });
 
   it("atinge metas iniciais por tipo de caso", () => {
@@ -39,6 +44,8 @@ describe("recurrence evaluation bench", () => {
     expect(suite.expectedTagMetrics.consistent_recurring_income.recall).toBeGreaterThanOrEqual(0.8);
     expect(suite.trapTagMetrics.variable_generic_income.precision).toBeGreaterThanOrEqual(0.9);
     expect(suite.expectedTagMetrics.alternating_common_tokens.recall).toBeGreaterThanOrEqual(0.8);
+    expect(suite.projectableTrapTagMetrics.marketplace_payouts.precision).toBeGreaterThanOrEqual(0.9);
+    expect(suite.projectableTrapTagMetrics.generic_card_or_fee.precision).toBeGreaterThanOrEqual(0.9);
   });
 
   it("registra fingerprints, confidence e erros detalhados por dataset", () => {
@@ -52,11 +59,13 @@ describe("recurrence evaluation bench", () => {
         expect(truePositive.detectedFingerprint).not.toBe("");
         expect(truePositive.confidence).toBeGreaterThan(0);
         expect(truePositive.tokenSimilarity).toBeGreaterThanOrEqual(0.4);
+        expect(truePositive.recurrenceStabilityScore).toBeGreaterThanOrEqual(0);
       }
 
       for (const falsePositive of report.falsePositives) {
         expect(falsePositive.detectedFingerprint).not.toBe("");
         expect(falsePositive.confidence).toBeGreaterThan(0);
+        expect(["fixed", "variable"]).toContain(falsePositive.recurrenceType);
       }
     }
   });
