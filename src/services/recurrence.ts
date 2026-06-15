@@ -13,56 +13,145 @@ import type {
 } from "@/types/cashflow";
 
 const FINGERPRINT_STOPWORDS = new Set([
+  "a",
+  "automatico",
+  "br",
+  "brasil",
+  "boleto",
+  "cartao",
+  "cliente",
+  "comercial",
+  "compra",
+  "competencia",
+  "credito",
+  "debito",
+  "doc",
+  "eireli",
+  "empresa",
+  "enviada",
   "pix",
   "enviado",
-  "enviada",
-  "recebido",
-  "recebida",
-  "recebimento",
+  "epp",
+  "fatura",
+  "fiscal",
+  "fornecedor",
+  "janeiro",
+  "jan",
+  "fevereiro",
+  "fev",
+  "marco",
+  "mar",
+  "abril",
+  "abr",
+  "maio",
+  "junho",
+  "jun",
+  "julho",
+  "jul",
+  "agosto",
+  "ago",
+  "setembro",
+  "set",
+  "outubro",
+  "out",
+  "novembro",
+  "nov",
+  "dezembro",
+  "dez",
+  "ltda",
+  "me",
+  "mei",
+  "mensal",
+  "mensalidade",
+  "mes",
+  "nf",
+  "nfe",
+  "nota",
   "pagamento",
   "pagto",
-  "compra",
-  "boleto",
-  "transferencia",
+  "parcela",
+  "parcelamento",
+  "pedido",
+  "recebida",
+  "recebido",
+  "recebimento",
+  "ref",
+  "referente",
+  "s",
+  "sa",
+  "sala",
+  "servico",
+  "servicos",
   "ted",
-  "doc",
+  "transferencia",
+  "aluguel",
   "venda"
 ]);
 
+type FingerprintedTransaction = {
+  transaction: TransactionForRecurrence;
+  fingerprint: string;
+  tokens: string[];
+};
+
+type RecurrenceCluster = {
+  groupKey: string;
+  items: FingerprintedTransaction[];
+};
+
 export function buildDescriptionFingerprint(normalizedDescription: string): string {
+  return getFingerprintTokens(normalizedDescription)
+    .slice(0, 6)
+    .join(" ");
+}
+
+function getFingerprintTokens(normalizedDescription: string): string[] {
   return normalizedDescription
     .split(" ")
     .filter((token) => token.length > 1)
     .filter((token) => !/^\d+$/.test(token))
     .filter((token) => !FINGERPRINT_STOPWORDS.has(token))
-    .slice(0, 6)
-    .join(" ");
+    .slice(0, 8);
 }
 
 export function detectRecurringPatterns(
   transactions: TransactionForRecurrence[]
 ): DetectedRecurringPattern[] {
-  const groups = new Map<string, TransactionForRecurrence[]>();
+  const clusters: RecurrenceCluster[] = [];
 
   for (const transaction of [...transactions].sort((a, b) => a.date.getTime() - b.date.getTime())) {
     const fingerprint = buildDescriptionFingerprint(transaction.normalizedDescription);
     const tokenCount = fingerprint.split(" ").filter(Boolean).length;
 
     // Receitas variaveis nao devem virar recorrencia so por cair todo mes.
-    if (!fingerprint || (transaction.type === "income" && tokenCount < 3)) {
+    if (!fingerprint || (transaction.type === "income" && tokenCount < 2)) {
       continue;
     }
 
     const categoryKey = transaction.categoryId ?? "uncategorized";
     const key = `${transaction.type}:${categoryKey}:${fingerprint}`;
-    const group = groups.get(key) ?? [];
-    group.push(transaction);
-    groups.set(key, group);
+    const item = {
+      transaction,
+      fingerprint,
+      tokens: fingerprint.split(" ")
+    };
+    const cluster = findMatchingCluster(clusters, `${transaction.type}:${categoryKey}`, item);
+
+    if (cluster) {
+      cluster.items.push(item);
+    } else {
+      clusters.push({
+        groupKey: key,
+        items: [item]
+      });
+    }
   }
 
   const patterns: DetectedRecurringPattern[] = [];
 
-  for (const group of groups.values()) {
+  for (const cluster of clusters) {
+    const group = cluster.items.map((item) => item.transaction);
+
     if (group.length < 3 || !hasConsistentType(group)) {
       continue;
     }
@@ -84,7 +173,7 @@ export function detectRecurringPatterns(
     const categoryId = getConsistentCategoryId(sorted);
     const accountId = getConsistentAccountId(sorted);
     const sameCategory = Boolean(categoryId);
-    const descriptionPattern = buildDescriptionFingerprint(sorted[0].normalizedDescription);
+    const descriptionPattern = buildClusterFingerprint(cluster.items);
     const datesRegular = true;
     const latestDate = toDateOnly(sorted[sorted.length - 1].date);
     const type = sorted[0].type;
@@ -121,6 +210,65 @@ export function detectRecurringPatterns(
   }
 
   return patterns;
+}
+
+function findMatchingCluster(
+  clusters: RecurrenceCluster[],
+  groupPrefix: string,
+  item: FingerprintedTransaction
+): RecurrenceCluster | undefined {
+  return clusters.find(
+    (cluster) =>
+      cluster.groupKey.startsWith(`${groupPrefix}:`) &&
+      cluster.items.some((existing) => areSimilarFingerprints(existing.tokens, item.tokens))
+  );
+}
+
+function areSimilarFingerprints(left: string[], right: string[]): boolean {
+  if (left.length === 0 || right.length === 0) {
+    return false;
+  }
+
+  if (left.join(" ") === right.join(" ")) {
+    return true;
+  }
+
+  if (left.length === 1 || right.length === 1) {
+    return left[0] === right[0];
+  }
+
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  const commonCount = [...leftSet].filter((token) => rightSet.has(token)).length;
+  const overlap = commonCount / Math.min(leftSet.size, rightSet.size);
+
+  return commonCount >= 2 && overlap >= 0.6;
+}
+
+function buildClusterFingerprint(items: FingerprintedTransaction[]): string {
+  const tokenCounts = new Map<string, number>();
+  const firstSeenOrder = new Map<string, number>();
+  const minOccurrences = Math.ceil(items.length * 0.6);
+
+  items.forEach((item, itemIndex) => {
+    const uniqueTokens = new Set(item.tokens);
+
+    for (const token of uniqueTokens) {
+      tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
+
+      if (!firstSeenOrder.has(token)) {
+        firstSeenOrder.set(token, itemIndex * 100 + item.tokens.indexOf(token));
+      }
+    }
+  });
+
+  const stableTokens = [...tokenCounts.entries()]
+    .filter(([, count]) => count >= minOccurrences)
+    .map(([token]) => token)
+    .sort((a, b) => (firstSeenOrder.get(a) ?? 0) - (firstSeenOrder.get(b) ?? 0))
+    .slice(0, 6);
+
+  return stableTokens.length > 0 ? stableTokens.join(" ") : items[0].fingerprint;
 }
 
 function detectFrequency(

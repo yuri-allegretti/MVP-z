@@ -32,6 +32,7 @@ Arquivos deste plano:
 - `06-pseudocodigo-algoritmos.md`: pseudocodigo dos algoritmos centrais.
 - `07-ui-fluxos-seguranca.md`: telas, fluxos e seguranca minima.
 - `08-testes-definicao-pronto.md`: testes minimos e definicao de pronto.
+- `09-replanejamento-v1-recorrencia.md`: novo foco da V1 em avaliacao e evolucao do algoritmo de recorrencia.
 
 Principio de implementacao:
 
