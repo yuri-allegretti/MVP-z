@@ -1,0 +1,257 @@
+# Schema Prisma proposto
+
+Este schema e a referencia completa para a V1.0. Pode ser copiado para `prisma/schema.prisma` na fase de implementacao.
+
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipRole {
+  owner
+  admin
+  member
+}
+
+enum AccountType {
+  checking
+  savings
+  cash
+  other
+}
+
+enum TransactionType {
+  income
+  expense
+}
+
+enum TransactionSource {
+  manual
+  csv
+  seed
+}
+
+enum CategoryType {
+  income
+  expense
+  both
+}
+
+enum RuleField {
+  description
+  normalizedDescription
+}
+
+enum RuleOperator {
+  contains
+  regex
+  equals
+}
+
+enum RecurringFrequency {
+  weekly
+  monthly
+  yearly
+  unknown
+}
+
+enum RecurringStatus {
+  suggested
+  confirmed
+  ignored
+}
+
+enum ProjectedCashflowSource {
+  recurring_pattern
+  manual_future
+  accounts_payable
+  accounts_receivable
+}
+
+model User {
+  id          String       @id @default(cuid())
+  name        String
+  email       String       @unique
+  createdAt   DateTime     @default(now())
+  memberships Membership[]
+}
+
+model Organization {
+  id                    String                  @id @default(cuid())
+  name                  String
+  createdAt             DateTime                @default(now())
+  memberships           Membership[]
+  accounts              Account[]
+  transactions          Transaction[]
+  categories            Category[]
+  categorizationRules   CategorizationRule[]
+  recurringPatterns     RecurringPattern[]
+  projectedCashflowItems ProjectedCashflowItem[]
+  userCorrections       UserCorrection[]
+}
+
+model Membership {
+  id             String           @id @default(cuid())
+  userId         String
+  organizationId String
+  role           MembershipRole
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+model Account {
+  id              String             @id @default(cuid())
+  organizationId  String
+  name            String
+  type            AccountType
+  initialBalance  Decimal            @db.Decimal(14, 2)
+  currentBalance  Decimal            @db.Decimal(14, 2)
+  currency        String             @default("BRL")
+  createdAt       DateTime           @default(now())
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+  recurringPatterns RecurringPattern[]
+
+  @@index([organizationId])
+}
+
+model Transaction {
+  id                    String              @id @default(cuid())
+  organizationId         String
+  accountId              String
+  date                   DateTime
+  description            String
+  rawDescription         String
+  normalizedDescription  String
+  amount                 Decimal             @db.Decimal(14, 2)
+  type                   TransactionType
+  categoryId             String?
+  categoryConfidence     Decimal?            @db.Decimal(3, 2)
+  source                 TransactionSource
+  createdAt              DateTime            @default(now())
+  organization           Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  account                Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category               Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  corrections            UserCorrection[]
+
+  @@index([organizationId, date])
+  @@index([organizationId, categoryId])
+  @@index([organizationId, accountId])
+  @@index([organizationId, normalizedDescription])
+}
+
+model Category {
+  id                    String                @id @default(cuid())
+  organizationId         String
+  name                  String
+  type                  CategoryType
+  isDefault             Boolean               @default(false)
+  createdAt             DateTime              @default(now())
+  organization           Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  transactions           Transaction[]
+  categorizationRules    CategorizationRule[]
+  recurringPatterns      RecurringPattern[]
+  oldCategoryCorrections UserCorrection[]      @relation("OldCategoryCorrections")
+  newCategoryCorrections UserCorrection[]      @relation("NewCategoryCorrections")
+
+  @@index([organizationId])
+  @@unique([organizationId, name])
+}
+
+model CategorizationRule {
+  id              String         @id @default(cuid())
+  organizationId  String
+  categoryId      String
+  field           RuleField
+  operator        RuleOperator
+  value           String
+  priority        Int            @default(100)
+  confidence      Decimal        @db.Decimal(3, 2)
+  createdAt       DateTime       @default(now())
+  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category        Category       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, priority])
+  @@index([categoryId])
+}
+
+model RecurringPattern {
+  id                    String                  @id @default(cuid())
+  organizationId         String
+  accountId              String?
+  categoryId             String?
+  merchantName           String?
+  descriptionPattern     String
+  averageAmount          Decimal                 @db.Decimal(14, 2)
+  minAmount              Decimal                 @db.Decimal(14, 2)
+  maxAmount              Decimal                 @db.Decimal(14, 2)
+  type                   TransactionType
+  frequency              RecurringFrequency
+  expectedDayOfMonth     Int?
+  expectedWeekday        Int?
+  confidence             Decimal                 @db.Decimal(3, 2)
+  nextExpectedDate       DateTime
+  status                 RecurringStatus          @default(suggested)
+  createdAt              DateTime                @default(now())
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  account                Account?                @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  category               Category?               @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  projectedCashflowItems ProjectedCashflowItem[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, nextExpectedDate])
+  @@index([organizationId, categoryId])
+  @@unique([organizationId, accountId, categoryId, descriptionPattern, frequency, type], name: "recurring_pattern_dedupe")
+}
+
+model ProjectedCashflowItem {
+  id                 String                  @id @default(cuid())
+  organizationId      String
+  recurringPatternId  String?
+  date               DateTime
+  description        String
+  amount             Decimal                 @db.Decimal(14, 2)
+  type               TransactionType
+  confidence         Decimal                 @db.Decimal(3, 2)
+  source             ProjectedCashflowSource
+  createdAt          DateTime                @default(now())
+  organization       Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recurringPattern   RecurringPattern?        @relation(fields: [recurringPatternId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, date])
+  @@index([organizationId, source])
+}
+
+model UserCorrection {
+  id              String        @id @default(cuid())
+  organizationId  String
+  transactionId   String
+  oldCategoryId   String?
+  newCategoryId   String
+  createdAt       DateTime      @default(now())
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  transaction     Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  oldCategory     Category?     @relation("OldCategoryCorrections", fields: [oldCategoryId], references: [id], onDelete: SetNull)
+  newCategory     Category      @relation("NewCategoryCorrections", fields: [newCategoryId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, transactionId])
+  @@index([organizationId, newCategoryId])
+}
+```
+
+## Observacoes de modelagem
+
+- Na V1, Category e CategorizationRule sempre pertencem a uma organizacao. Categorias globais ficam fora do escopo.
+- `categoryConfidence` foi adicionado em Transaction porque a regra de negocio precisa registrar a confianca atribuida pela categorizacao.
+- `RecurringPattern.type` e obrigatorio para a projecao saber se o item recorrente aumenta ou reduz caixa.
+- `ProjectedCashflowItem` permanece no schema, mas a V1 calcula projecoes em memoria. A tabela nao deve ser obrigatoria para gerar projecao.
+- `currentBalance` nao deve ser a fonte da verdade na V1. Criar funcao unica para calcular saldo sob demanda: `initialBalance + incomes - expenses`.
+- A constraint `recurring_pattern_dedupe` ajuda a evitar duplicidade. Como `accountId` e `categoryId` podem ser nulos, o servico tambem deve fazer busca previa por duplicata tratando `null` explicitamente.
