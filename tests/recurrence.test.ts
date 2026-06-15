@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { normalizeDescription } from "../src/services/normalization";
 import { detectRecurringPatterns } from "../src/services/recurrence";
 import type { TransactionForRecurrence } from "../src/types/cashflow";
 
@@ -43,6 +44,47 @@ describe("detectRecurringPatterns", () => {
 
     expect(detectRecurringPatterns(transactions)).toEqual([]);
   });
+
+  it("agrupa descricoes do mesmo fornecedor por similaridade de tokens, sem exigir chave textual exata", () => {
+    const transactions: TransactionForRecurrence[] = [
+      tx("1", "2026-01-05", "PIX IMOBILIARIA SAO JOSE", 8500, "expense", "rent"),
+      tx("2", "2026-02-06", "ALUGUEL SALA COMERCIAL IMOBILIARIA SAO JOSE", 8500, "expense", "rent"),
+      tx("3", "2026-03-05", "PIX IMOBILIARIA SAO JOSE", 8500, "expense", "rent"),
+      tx("4", "2026-04-04", "ALUGUEL SALA COMERCIAL IMOBILIARIA SAO JOSE", 8500, "expense", "rent")
+    ];
+
+    const patterns = detectRecurringPatterns(transactions, { minTokenJaccard: 0.6 });
+
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0]).toMatchObject({
+      descriptionPattern: "imobiliaria sao jose",
+      frequency: "monthly",
+      categoryId: "rent"
+    });
+    expect(patterns[0].transactionIds.sort()).toEqual(["1", "2", "3", "4"]);
+  });
+
+  it("nao agrupa descricoes parecidas quando fornecedores sao diferentes", () => {
+    const transactions: TransactionForRecurrence[] = [
+      tx("1", "2026-01-05", "PIX IMOBILIARIA SAO JOSE", 8500, "expense", "rent"),
+      tx("2", "2026-02-05", "ALUGUEL SALA COMERCIAL IMOBILIARIA SAO PEDRO", 8500, "expense", "rent"),
+      tx("3", "2026-03-05", "PIX IMOBILIARIA SAO LUCAS", 8500, "expense", "rent"),
+      tx("4", "2026-04-05", "ALUGUEL SALA COMERCIAL IMOBILIARIA SANTO ANTONIO", 8500, "expense", "rent")
+    ];
+
+    expect(detectRecurringPatterns(transactions)).toEqual([]);
+  });
+
+  it("nao transforma receitas variaveis frequentes em recorrencia automaticamente", () => {
+    const transactions: TransactionForRecurrence[] = [
+      tx("1", "2026-01-10", "PIX RECEBIDO VENDA CLIENTE ALFA CONTRATO PROJETO", 9000, "income", "sales"),
+      tx("2", "2026-02-10", "PIX RECEBIDO VENDA CLIENTE BETA CONTRATO PROJETO", 10000, "income", "sales"),
+      tx("3", "2026-03-10", "PIX RECEBIDO VENDA CLIENTE GAMA CONTRATO PROJETO", 11000, "income", "sales"),
+      tx("4", "2026-04-10", "PIX RECEBIDO VENDA CLIENTE DELTA CONTRATO PROJETO", 12000, "income", "sales")
+    ];
+
+    expect(detectRecurringPatterns(transactions)).toEqual([]);
+  });
 });
 
 function tx(
@@ -58,7 +100,7 @@ function tx(
     accountId: "account",
     categoryId,
     date: new Date(`${date}T00:00:00.000Z`),
-    normalizedDescription,
+    normalizedDescription: normalizeDescription(normalizedDescription),
     amount,
     type
   };

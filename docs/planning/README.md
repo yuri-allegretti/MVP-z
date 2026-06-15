@@ -33,6 +33,7 @@ Arquivos deste plano:
 - `07-ui-fluxos-seguranca.md`: telas, fluxos e seguranca minima.
 - `08-testes-definicao-pronto.md`: testes minimos e definicao de pronto.
 - `09-replanejamento-v1-recorrencia.md`: novo foco da V1 em avaliacao e evolucao do algoritmo de recorrencia.
+- `10-criterios-quantitativos-recorrencia.md`: criterios numericos para validar e comparar versoes do algoritmo de recorrencia.
 
 Principio de implementacao:
 

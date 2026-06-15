@@ -72,6 +72,7 @@ const FINGERPRINT_STOPWORDS = new Set([
   "parcela",
   "parcelamento",
   "pedido",
+  "plano",
   "recebida",
   "recebido",
   "recebimento",
@@ -82,6 +83,8 @@ const FINGERPRINT_STOPWORDS = new Set([
   "sala",
   "servico",
   "servicos",
+  "empresarial",
+  "funcionarios",
   "ted",
   "transferencia",
   "aluguel",
@@ -95,9 +98,15 @@ type FingerprintedTransaction = {
 };
 
 type RecurrenceCluster = {
-  groupKey: string;
+  bucketKey: string;
   items: FingerprintedTransaction[];
 };
+
+export type RecurrenceDetectionOptions = {
+  minTokenJaccard?: number;
+};
+
+const DEFAULT_MIN_TOKEN_JACCARD = 0.6;
 
 export function buildDescriptionFingerprint(normalizedDescription: string): string {
   return getFingerprintTokens(normalizedDescription)
@@ -115,8 +124,10 @@ function getFingerprintTokens(normalizedDescription: string): string[] {
 }
 
 export function detectRecurringPatterns(
-  transactions: TransactionForRecurrence[]
+  transactions: TransactionForRecurrence[],
+  options: RecurrenceDetectionOptions = {}
 ): DetectedRecurringPattern[] {
+  const minTokenJaccard = options.minTokenJaccard ?? DEFAULT_MIN_TOKEN_JACCARD;
   const clusters: RecurrenceCluster[] = [];
 
   for (const transaction of [...transactions].sort((a, b) => a.date.getTime() - b.date.getTime())) {
@@ -129,19 +140,19 @@ export function detectRecurringPatterns(
     }
 
     const categoryKey = transaction.categoryId ?? "uncategorized";
-    const key = `${transaction.type}:${categoryKey}:${fingerprint}`;
+    const bucketKey = `${transaction.type}:${categoryKey}`;
     const item = {
       transaction,
       fingerprint,
       tokens: fingerprint.split(" ")
     };
-    const cluster = findMatchingCluster(clusters, `${transaction.type}:${categoryKey}`, item);
+    const cluster = findMatchingCluster(clusters, bucketKey, item, minTokenJaccard);
 
     if (cluster) {
       cluster.items.push(item);
     } else {
       clusters.push({
-        groupKey: key,
+        bucketKey,
         items: [item]
       });
     }
@@ -214,35 +225,28 @@ export function detectRecurringPatterns(
 
 function findMatchingCluster(
   clusters: RecurrenceCluster[],
-  groupPrefix: string,
-  item: FingerprintedTransaction
+  bucketKey: string,
+  item: FingerprintedTransaction,
+  minTokenJaccard: number
 ): RecurrenceCluster | undefined {
   return clusters.find(
     (cluster) =>
-      cluster.groupKey.startsWith(`${groupPrefix}:`) &&
-      cluster.items.some((existing) => areSimilarFingerprints(existing.tokens, item.tokens))
+      cluster.bucketKey === bucketKey &&
+      cluster.items.some((existing) => jaccardSimilarity(existing.tokens, item.tokens) >= minTokenJaccard)
   );
 }
 
-function areSimilarFingerprints(left: string[], right: string[]): boolean {
+function jaccardSimilarity(left: string[], right: string[]): number {
   if (left.length === 0 || right.length === 0) {
-    return false;
-  }
-
-  if (left.join(" ") === right.join(" ")) {
-    return true;
-  }
-
-  if (left.length === 1 || right.length === 1) {
-    return left[0] === right[0];
+    return 0;
   }
 
   const leftSet = new Set(left);
   const rightSet = new Set(right);
-  const commonCount = [...leftSet].filter((token) => rightSet.has(token)).length;
-  const overlap = commonCount / Math.min(leftSet.size, rightSet.size);
+  const intersectionSize = [...leftSet].filter((token) => rightSet.has(token)).length;
+  const unionSize = new Set([...leftSet, ...rightSet]).size;
 
-  return commonCount >= 2 && overlap >= 0.6;
+  return unionSize === 0 ? 0 : intersectionSize / unionSize;
 }
 
 function buildClusterFingerprint(items: FingerprintedTransaction[]): string {
